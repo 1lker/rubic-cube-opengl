@@ -12,8 +12,6 @@ set(CMAKE_MAKEFILE_DEPENDS
   "CMakeFiles/3.31.6/CMakeCXXCompiler.cmake"
   "CMakeFiles/3.31.6/CMakeSystem.cmake"
   "/Users/ilkeryoru/Desktop/SPRING-2025/COMP-410/HW/hw-2-rubic-cube/fshader.glsl"
-  "/Users/ilkeryoru/Desktop/SPRING-2025/COMP-410/HW/hw-2-rubic-cube/picking_fshader.glsl"
-  "/Users/ilkeryoru/Desktop/SPRING-2025/COMP-410/HW/hw-2-rubic-cube/picking_vshader.glsl"
   "/Users/ilkeryoru/Desktop/SPRING-2025/COMP-410/HW/hw-2-rubic-cube/vshader.glsl"
   "/opt/homebrew/lib/cmake/glfw3/glfw3Config.cmake"
   "/opt/homebrew/lib/cmake/glfw3/glfw3ConfigVersion.cmake"
@@ -151,8 +149,6 @@ set(CMAKE_MAKEFILE_PRODUCTS
   "CMakeFiles/3.31.6/CMakeCCompiler.cmake"
   "CMakeFiles/3.31.6/CMakeCXXCompiler.cmake"
   "fshader.glsl"
-  "picking_fshader.glsl"
-  "picking_vshader.glsl"
   "vshader.glsl"
   "CMakeFiles/CMakeDirectoryInformation.cmake"
   )
