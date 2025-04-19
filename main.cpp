@@ -71,7 +71,7 @@ void scroll_callback(GLFWwindow* window, double xoffset, double yoffset);
 void framebuffer_size_callback(GLFWwindow* window, int width, int height);
 void printHelp();
 bool is_point_on_cube(double x, double y);
-std::pair<int, int> pick_face(double mouse_x, double mouse_y);
+std::pair<int, int> pick_face(double mouse_x, double mouse_y, bool force_selection = false);
 
 // Function required by the project specification
 void project_done() {
@@ -216,9 +216,12 @@ bool is_point_on_cube(double x, double y) {
 
 // Ray-cube intersection for better face picking
 bool ray_cube_intersection(const vec3& ray_origin, const vec3& ray_dir, 
-                          vec3& intersection_point, int& face_hit) {
+                          vec3& intersection_point, int& face_hit, bool force_selection = false) {
     // Cube bounds (considering all cubies and spacing)
     float cube_size = 3.0f * CUBE_SIZE + 2.0f * CUBE_GAP;
+    // Increase cube size for more forgiving intersection testing
+    cube_size *= 1.5f;  // Make the cube 50% larger for intersection purposes
+    
     float min_bound = -cube_size/2.0f;
     float max_bound = cube_size/2.0f;
     
@@ -341,6 +344,50 @@ bool ray_cube_intersection(const vec3& ray_origin, const vec3& ray_dir,
         return true;
     }
     
+    // If force_selection is true and no face was hit, choose the most front-facing face
+    if (force_selection) {
+        // Determine which face is most front-facing (largest dot product with view direction)
+        vec3 view_dir = -ray_dir;  // Invert ray direction to get view direction
+        float max_dot = -1.0f;
+        int best_face = -1;
+        
+        // Check each face normal
+        float dots[6];
+        dots[RIGHT] = dot(view_dir, vec3(1, 0, 0));
+        dots[LEFT] = dot(view_dir, vec3(-1, 0, 0));
+        dots[TOP] = dot(view_dir, vec3(0, 1, 0));
+        dots[BOTTOM] = dot(view_dir, vec3(0, -1, 0));
+        dots[FRONT] = dot(view_dir, vec3(0, 0, 1));
+        dots[BACK] = dot(view_dir, vec3(0, 0, -1));
+        
+        for (int i = 0; i < 6; i++) {
+            if (dots[i] > max_dot) {
+                max_dot = dots[i];
+                best_face = i;
+            }
+        }
+        
+        if (best_face != -1) {
+            face_hit = best_face;
+            
+            // Create an intersection point on that face (approximate)
+            float dist = cam_distance * 0.8f;  // Use a reasonable distance
+            
+            // Set a default position based on the face
+            switch (best_face) {
+                case RIGHT: intersection_point = vec3(max_bound, 0, 0); break;
+                case LEFT: intersection_point = vec3(min_bound, 0, 0); break;
+                case TOP: intersection_point = vec3(0, max_bound, 0); break;
+                case BOTTOM: intersection_point = vec3(0, min_bound, 0); break;
+                case FRONT: intersection_point = vec3(0, 0, max_bound); break;
+                case BACK: intersection_point = vec3(0, 0, min_bound); break;
+            }
+            
+            printf("Forced selection: face %d with dot product %.2f\n", best_face, max_dot);
+            return true;
+        }
+    }
+    
     printf("No face intersection found\n");
     return false;
 }
@@ -376,7 +423,7 @@ void mouse_to_ray(double mouse_x, double mouse_y, vec3& ray_origin, vec3& ray_di
 }
 
 // Determine which face was clicked
-std::pair<int, int> pick_face(double mouse_x, double mouse_y) {
+std::pair<int, int> pick_face(double mouse_x, double mouse_y, bool force_selection) {
     // If click is outside cube bounds, return invalid face
     if (!is_point_on_cube(mouse_x, mouse_y)) {
         return std::make_pair(-1, 0);
@@ -390,7 +437,7 @@ std::pair<int, int> pick_face(double mouse_x, double mouse_y) {
     vec3 intersection_point;
     int face_hit;
     
-    if (ray_cube_intersection(ray_origin, ray_dir, intersection_point, face_hit)) {
+    if (ray_cube_intersection(ray_origin, ray_dir, intersection_point, face_hit, force_selection)) {
         // Determine layer based on intersection point
         float spacing = CUBE_SIZE + CUBE_GAP;
         float cube_size = 3.0f * CUBE_SIZE + 2.0f * CUBE_GAP;
@@ -579,52 +626,52 @@ void key_callback(GLFWwindow* window, int key, int scancode, int action, int mod
             // Face rotations - clockwise
             case GLFW_KEY_R:
                 if (!(mods & GLFW_MOD_SHIFT) && !rubiksCube.isAnimating())
-                    rubiksCube.startRotation(RIGHT, 1, true);
+                    rubiksCube.startRotation(RIGHT, 1, true); // True means CW
                 else if ((mods & GLFW_MOD_SHIFT) && !rubiksCube.isAnimating())
-                    rubiksCube.startRotation(RIGHT, 1, false);  // Shift+R for CCW
+                    rubiksCube.startRotation(RIGHT, 1, false);  // False means CCW
                 break;
             case GLFW_KEY_L:
                 if (!(mods & GLFW_MOD_SHIFT) && !rubiksCube.isAnimating())
-                    rubiksCube.startRotation(LEFT, -1, true);
+                    rubiksCube.startRotation(LEFT, -1, true); // True means CW
                 else if ((mods & GLFW_MOD_SHIFT) && !rubiksCube.isAnimating())
-                    rubiksCube.startRotation(LEFT, -1, false);  // Shift+L for CCW
+                    rubiksCube.startRotation(LEFT, -1, false);  // False means CCW
                 break;
             case GLFW_KEY_U:
                 if (!(mods & GLFW_MOD_SHIFT) && !rubiksCube.isAnimating())
-                    rubiksCube.startRotation(TOP, 1, true);
+                    rubiksCube.startRotation(TOP, 1, true); // True means CW
                 else if ((mods & GLFW_MOD_SHIFT) && !rubiksCube.isAnimating())
-                    rubiksCube.startRotation(TOP, 1, false);  // Shift+U for CCW
+                    rubiksCube.startRotation(TOP, 1, false);  // False means CCW
                 break;
             case GLFW_KEY_D:
                 if (!(mods & GLFW_MOD_SHIFT) && !rubiksCube.isAnimating())
-                    rubiksCube.startRotation(BOTTOM, -1, true);
+                    rubiksCube.startRotation(BOTTOM, -1, true); // True means CW
                 else if ((mods & GLFW_MOD_SHIFT) && !rubiksCube.isAnimating())
-                    rubiksCube.startRotation(BOTTOM, -1, false);  // Shift+D for CCW
+                    rubiksCube.startRotation(BOTTOM, -1, false);  // False means CCW
                 break;
             case GLFW_KEY_F:
                 if (!(mods & GLFW_MOD_SHIFT) && !rubiksCube.isAnimating())
-                    rubiksCube.startRotation(FRONT, 1, true);
+                    rubiksCube.startRotation(FRONT, 1, true); // True means CW
                 else if ((mods & GLFW_MOD_SHIFT) && !rubiksCube.isAnimating())
-                    rubiksCube.startRotation(FRONT, 1, false);  // Shift+F for CCW
+                    rubiksCube.startRotation(FRONT, 1, false);  // False means CCW
                 break;
             case GLFW_KEY_B:
                 if (!(mods & GLFW_MOD_SHIFT) && !rubiksCube.isAnimating())
-                    rubiksCube.startRotation(BACK, -1, true);
+                    rubiksCube.startRotation(BACK, -1, true); // True means CW
                 else if ((mods & GLFW_MOD_SHIFT) && !rubiksCube.isAnimating())
-                    rubiksCube.startRotation(BACK, -1, false);  // Shift+B for CCW
+                    rubiksCube.startRotation(BACK, -1, false);  // False means CCW
                 break;
             // Middle slices
             case GLFW_KEY_M:
                 if (!(mods & GLFW_MOD_SHIFT) && !rubiksCube.isAnimating())
-                    rubiksCube.startRotation(LEFT, 0, true);
+                    rubiksCube.startRotation(LEFT, 0, true); // True means CW
                 else if ((mods & GLFW_MOD_SHIFT) && !rubiksCube.isAnimating())
-                    rubiksCube.startRotation(LEFT, 0, false);  // Shift+M for CCW
+                    rubiksCube.startRotation(LEFT, 0, false);  // False means CCW
                 break;
             case GLFW_KEY_E:
                 if (!(mods & GLFW_MOD_SHIFT) && !rubiksCube.isAnimating())
-                    rubiksCube.startRotation(TOP, 0, true);
+                    rubiksCube.startRotation(TOP, 0, true); // True means CW
                 else if ((mods & GLFW_MOD_SHIFT) && !rubiksCube.isAnimating())
-                    rubiksCube.startRotation(TOP, 0, false);  // Shift+E for CCW
+                    rubiksCube.startRotation(TOP, 0, false);  // False means CCW
                 break;
             case GLFW_KEY_S:
                 if (!(mods & GLFW_MOD_SHIFT)) {
@@ -635,7 +682,7 @@ void key_callback(GLFWwindow* window, int key, int scancode, int action, int mod
                     }
                 } else if ((mods & GLFW_MOD_SHIFT) && !rubiksCube.isAnimating()) {
                     // Shift+S for middle Z slice rotation
-                    rubiksCube.startRotation(FRONT, 0, false);
+                    rubiksCube.startRotation(FRONT, 0, false); // False means CCW
                 }
                 break;
             // Other controls
@@ -675,8 +722,8 @@ void mouse_button_callback(GLFWwindow* window, int button, int action, int mods)
             printf("Click is %s the cube\n", on_cube ? "ON" : "NOT ON");
             
             if (on_cube) {
-                // Set drag mode for face rotation
-                auto pick_result = pick_face(xpos, ypos);
+                // Set drag mode for face rotation - force a face selection for left mouse button
+                auto pick_result = pick_face(xpos, ypos, true);  // Force face selection
                 drag_face = pick_result.first;
                 drag_layer = pick_result.second;
                 
@@ -685,8 +732,10 @@ void mouse_button_callback(GLFWwindow* window, int button, int action, int mods)
                 // Only set drag_started if we have a valid face
                 if (drag_face >= 0 && drag_face < 6) {
                     drag_started = true;
+                    is_rotating_view = false;  // Ensure we're not rotating the view
+                    printf("Valid face selected, preparing for rotation\n");
                 } else {
-                    // Not on a valid face, so rotate view
+                    // Should never happen with force_selection=true
                     is_rotating_view = true;
                     printf("No valid face selected, rotating view\n");
                 }
@@ -709,6 +758,7 @@ void mouse_button_callback(GLFWwindow* window, int button, int action, int mods)
             
             // If we didn't drag much, treat as a click
             if (distance < 5.0 && is_point_on_cube(xpos, ypos) && !rubiksCube.isAnimating() && drag_face >= 0) {
+                // Standard convention: no shift = CW, shift = CCW
                 bool clockwise = !shift_pressed;
                 printf("CLICK ROTATION: face %d, layer %d, %s\n", 
                        drag_face, drag_layer, clockwise ? "CW" : "CCW");
@@ -822,7 +872,7 @@ void cursor_position_callback(GLFWwindow* window, double xpos, double ypos) {
                     printf("Shift pressed, inverting rotation to: %s\n", clockwise ? "CW" : "CCW");
                 }
                 
-                // Start the rotation
+                // Start the rotation (now using standard convention)
                 printf("Starting drag rotation: face=%d, layer=%d, %s\n", 
                        drag_face, drag_layer, clockwise ? "CW" : "CCW");
                 rubiksCube.startRotation(drag_face, drag_layer, clockwise);
@@ -831,6 +881,19 @@ void cursor_position_callback(GLFWwindow* window, double xpos, double ypos) {
                 // Reset drag state
                 drag_started = false;
                 drag_face = -1;
+            }
+        } else if (is_point_on_cube(xpos, ypos) && !is_rotating_view) {
+            // If we lost the drag tracking for some reason, 
+            // try to reacquire a face if mouse is still over the cube
+            if (drag_face == -1 && !rubiksCube.isAnimating()) {
+                auto pick_result = pick_face(xpos, ypos, true);
+                drag_face = pick_result.first;
+                drag_layer = pick_result.second;
+                
+                if (drag_face >= 0) {
+                    drag_started = true;
+                    printf("Reacquired face: %d, layer: %d\n", drag_face, drag_layer);
+                }
             }
         }
     }

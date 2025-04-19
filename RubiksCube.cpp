@@ -83,9 +83,9 @@ void RubiksCube::startRotation(int face, int layer, bool clockwise) {
     animation_active = true;
 
     rotation_axis = FACE_DIR[face];
-    if (clockwise) rotation_axis = -rotation_axis;
+    if (!clockwise) rotation_axis = -rotation_axis;
 
-    logRotation(face, layer, !clockwise);
+    logRotation(face, layer, clockwise);
 }
 
 void RubiksCube::updateAnimation() {
@@ -106,7 +106,7 @@ void RubiksCube::updateAnimation() {
 
     rotation_angle += ROTATION_SPEED;
     if (rotation_angle >= 90.0f) {
-        updateCubiesAfterRotation(rotating_face, rotating_layer, !rotating_clockwise);
+        updateCubiesAfterRotation(rotating_face, rotating_layer, rotating_clockwise);
         rotation_angle = 0.0f;
         animation_active = false;
         
