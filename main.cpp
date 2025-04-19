@@ -1,0 +1,683 @@
+#define GL_SILENCE_DEPRECATION
+#include "Angel.h"
+#include "RubiksCube.h"
+#include "Cubie.h"
+#include <vector>
+#include <algorithm>
+#include <ctime>
+#include <cmath>
+
+// Comment required by the project specification
+// Ortho is the new Porto!
+// Pineapple is important
+
+// Vertices of a unit cube centered at origin
+point4 vertices[8] = {
+    point4(-0.5, -0.5,  0.5, 1.0),  // 0: left-bottom-front
+    point4(-0.5,  0.5,  0.5, 1.0),  // 1: left-top-front
+    point4( 0.5,  0.5,  0.5, 1.0),  // 2: right-top-front
+    point4( 0.5, -0.5,  0.5, 1.0),  // 3: right-bottom-front
+    point4(-0.5, -0.5, -0.5, 1.0),  // 4: left-bottom-back
+    point4(-0.5,  0.5, -0.5, 1.0),  // 5: left-top-back
+    point4( 0.5,  0.5, -0.5, 1.0),  // 6: right-top-back
+    point4( 0.5, -0.5, -0.5, 1.0)   // 7: right-bottom-back
+};
+
+// Indices for each face (clockwise ordering)
+const int face_indices[6][4] = {
+    {3, 2, 6, 7},  // right face (+X)
+    {0, 1, 5, 4},  // left face (-X)
+    {1, 2, 6, 5},  // top face (+Y)
+    {0, 4, 7, 3},  // bottom face (-Y)
+    {0, 3, 2, 1},  // front face (+Z)
+    {4, 5, 6, 7}   // back face (-Z)
+};
+
+// Global variables
+RubiksCube rubiksCube;
+
+// Vertex data for rendering
+std::vector<point4> points;
+std::vector<color4> colors;
+
+// Camera control
+float cam_distance = 4.0f;
+float cam_theta = 0.5f;
+float cam_phi = 0.5f;
+double last_x = 0.0, last_y = 0.0;
+bool mouse_dragging = false;
+bool is_rotating_view = false;
+
+// Shader uniforms
+GLuint ModelView, Projection;
+
+// Vertex buffer and array objects
+GLuint vao;
+GLuint buffer;
+
+// Function prototypes
+void key_callback(GLFWwindow* window, int key, int scancode, int action, int mods);
+void mouse_button_callback(GLFWwindow* window, int button, int action, int mods);
+void cursor_position_callback(GLFWwindow* window, double xpos, double ypos);
+void framebuffer_size_callback(GLFWwindow* window, int width, int height);
+void printHelp();
+bool is_point_on_cube(double x, double y);
+std::pair<int, int> pick_face(double mouse_x, double mouse_y);
+
+// Function required by the project specification
+void project_done() {
+    printf("314254 Done!\n");
+}
+
+// Create vertices and colors for a single cubie
+void generate_cubie_geometry(const Cubie& cubie, std::vector<point4>& out_points, std::vector<color4>& out_colors) {
+    // For each face
+    for (int face = 0; face < 6; face++) {
+        // Skip invisible faces (inner faces)
+        if (!cubie.visible[face]) continue;
+        
+        // Create two triangles for this face
+        int a = face_indices[face][0];
+        int b = face_indices[face][1];
+        int c = face_indices[face][2];
+        int d = face_indices[face][3];
+        
+        // Triangle 1
+        out_points.push_back(vertices[a]);
+        out_points.push_back(vertices[b]);
+        out_points.push_back(vertices[c]);
+        
+        out_colors.push_back(cubie.colors[face]);
+        out_colors.push_back(cubie.colors[face]);
+        out_colors.push_back(cubie.colors[face]);
+        
+        // Triangle 2
+        out_points.push_back(vertices[a]);
+        out_points.push_back(vertices[c]);
+        out_points.push_back(vertices[d]);
+        
+        out_colors.push_back(cubie.colors[face]);
+        out_colors.push_back(cubie.colors[face]);
+        out_colors.push_back(cubie.colors[face]);
+    }
+}
+
+// Regenerate all geometry
+void regenerate_geometry() {
+    points.clear();
+    colors.clear();
+    
+    // Generate geometry for each cubie
+    for (const Cubie& cubie : rubiksCube.getCubies()) {
+        generate_cubie_geometry(cubie, points, colors);
+    }
+    
+    // Update the buffer
+    glBindBuffer(GL_ARRAY_BUFFER, buffer);
+    glBufferData(GL_ARRAY_BUFFER, 
+                 points.size() * sizeof(point4) + colors.size() * sizeof(color4), 
+                 NULL, 
+                 GL_STATIC_DRAW);
+    
+    glBufferSubData(GL_ARRAY_BUFFER, 0, 
+                   points.size() * sizeof(point4), points.data());
+    
+    glBufferSubData(GL_ARRAY_BUFFER, points.size() * sizeof(point4), 
+                   colors.size() * sizeof(color4), colors.data());
+}
+
+// Initialize OpenGL state
+void init() {
+    // Initialize the Rubik's cube
+    rubiksCube.initialize();
+    
+    // Generate initial geometry
+    regenerate_geometry();
+    
+    // Load shaders
+    GLuint program = InitShader("vshader.glsl", "fshader.glsl");
+    glUseProgram(program);
+    
+    // Create vertex array and buffer
+    glGenVertexArrays(1, &vao);
+    glGenBuffers(1, &buffer);
+    
+    // Bind vertex array
+    glBindVertexArray(vao);
+    
+    // Bind buffer and upload vertex data
+    glBindBuffer(GL_ARRAY_BUFFER, buffer);
+    glBufferData(GL_ARRAY_BUFFER, 
+                 points.size() * sizeof(point4) + colors.size() * sizeof(color4), 
+                 NULL, 
+                 GL_STATIC_DRAW);
+    
+    // Upload points
+    glBufferSubData(GL_ARRAY_BUFFER, 0, 
+                   points.size() * sizeof(point4), points.data());
+    
+    // Upload colors
+    glBufferSubData(GL_ARRAY_BUFFER, points.size() * sizeof(point4), 
+                   colors.size() * sizeof(color4), colors.data());
+    
+    // Set up vertex attributes
+    GLuint vPosition = glGetAttribLocation(program, "vPosition");
+    glEnableVertexAttribArray(vPosition);
+    glVertexAttribPointer(vPosition, 4, GL_FLOAT, GL_FALSE, 0, BUFFER_OFFSET(0));
+    
+    GLuint vColor = glGetAttribLocation(program, "vColor");
+    glEnableVertexAttribArray(vColor);
+    glVertexAttribPointer(vColor, 4, GL_FLOAT, GL_FALSE, 0, 
+                         BUFFER_OFFSET(points.size() * sizeof(point4)));
+    
+    // Get uniform locations
+    ModelView = glGetUniformLocation(program, "ModelView");
+    Projection = glGetUniformLocation(program, "Projection");
+    
+    // Set projection matrix
+    mat4 projection = Perspective(45.0, 1.0, 0.1, 100.0);
+    glUniformMatrix4fv(Projection, 1, GL_TRUE, projection);
+    
+    // Enable depth testing
+    glEnable(GL_DEPTH_TEST);
+    glClearColor(0.2, 0.2, 0.2, 1.0);
+}
+
+// Check if a point is within the cube's bounds
+bool is_point_on_cube(double x, double y) {
+    // Get current window size
+    int width, height;
+    glfwGetFramebufferSize(glfwGetCurrentContext(), &width, &height);
+    
+    // Normalize device coordinates (-1 to 1)
+    float ndc_x = (2.0f * x) / width - 1.0f;
+    float ndc_y = 1.0f - (2.0f * y) / height;
+    
+    // Simple check if point is within a certain radius from center
+    // Adjust the radius as needed
+    const float radius = 0.7f; // This covers most of the cube's projection
+    return (ndc_x * ndc_x + ndc_y * ndc_y) < (radius * radius);
+}
+
+// Ray-cube intersection for better face picking
+bool ray_cube_intersection(const vec3& ray_origin, const vec3& ray_dir, 
+                          vec3& intersection_point, int& face_hit) {
+    // Cube bounds (considering all cubies and spacing)
+    float cube_size = 3.0f * CUBE_SIZE + 2.0f * CUBE_GAP;
+    float min_bound = -cube_size/2.0f;
+    float max_bound = cube_size/2.0f;
+    
+    // Ray-box intersection test
+    float t_min = INFINITY;
+    int hit_face = -1;
+    
+    // Test each face of the cube
+    // Right face (+X)
+    if (ray_dir.x != 0.0f) {
+        float t = (max_bound - ray_origin.x) / ray_dir.x;
+        if (t > 0.0f) {
+            vec3 p = ray_origin + t * ray_dir;
+            if (p.y >= min_bound && p.y <= max_bound && 
+                p.z >= min_bound && p.z <= max_bound) {
+                if (t < t_min) {
+                    t_min = t;
+                    hit_face = RIGHT;
+                    intersection_point = p;
+                }
+            }
+        }
+    }
+    
+    // Left face (-X)
+    if (ray_dir.x != 0.0f) {
+        float t = (min_bound - ray_origin.x) / ray_dir.x;
+        if (t > 0.0f) {
+            vec3 p = ray_origin + t * ray_dir;
+            if (p.y >= min_bound && p.y <= max_bound && 
+                p.z >= min_bound && p.z <= max_bound) {
+                if (t < t_min) {
+                    t_min = t;
+                    hit_face = LEFT;
+                    intersection_point = p;
+                }
+            }
+        }
+    }
+    
+    // Top face (+Y)
+    if (ray_dir.y != 0.0f) {
+        float t = (max_bound - ray_origin.y) / ray_dir.y;
+        if (t > 0.0f) {
+            vec3 p = ray_origin + t * ray_dir;
+            if (p.x >= min_bound && p.x <= max_bound && 
+                p.z >= min_bound && p.z <= max_bound) {
+                if (t < t_min) {
+                    t_min = t;
+                    hit_face = TOP;
+                    intersection_point = p;
+                }
+            }
+        }
+    }
+    
+    // Bottom face (-Y)
+    if (ray_dir.y != 0.0f) {
+        float t = (min_bound - ray_origin.y) / ray_dir.y;
+        if (t > 0.0f) {
+            vec3 p = ray_origin + t * ray_dir;
+            if (p.x >= min_bound && p.x <= max_bound && 
+                p.z >= min_bound && p.z <= max_bound) {
+                if (t < t_min) {
+                    t_min = t;
+                    hit_face = BOTTOM;
+                    intersection_point = p;
+                }
+            }
+        }
+    }
+    
+    // Front face (+Z)
+    if (ray_dir.z != 0.0f) {
+        float t = (max_bound - ray_origin.z) / ray_dir.z;
+        if (t > 0.0f) {
+            vec3 p = ray_origin + t * ray_dir;
+            if (p.x >= min_bound && p.x <= max_bound && 
+                p.y >= min_bound && p.y <= max_bound) {
+                if (t < t_min) {
+                    t_min = t;
+                    hit_face = FRONT;
+                    intersection_point = p;
+                }
+            }
+        }
+    }
+    
+    // Back face (-Z)
+    if (ray_dir.z != 0.0f) {
+        float t = (min_bound - ray_origin.z) / ray_dir.z;
+        if (t > 0.0f) {
+            vec3 p = ray_origin + t * ray_dir;
+            if (p.x >= min_bound && p.x <= max_bound && 
+                p.y >= min_bound && p.y <= max_bound) {
+                if (t < t_min) {
+                    t_min = t;
+                    hit_face = BACK;
+                    intersection_point = p;
+                }
+            }
+        }
+    }
+    
+    if (hit_face != -1) {
+        face_hit = hit_face;
+        return true;
+    }
+    
+    return false;
+}
+
+// Convert mouse coordinates to a ray in world space
+void mouse_to_ray(double mouse_x, double mouse_y, vec3& ray_origin, vec3& ray_dir) {
+    // Get current window size
+    int width, height;
+    glfwGetFramebufferSize(glfwGetCurrentContext(), &width, &height);
+    
+    // Normalize device coordinates (-1 to 1)
+    float ndc_x = (2.0f * mouse_x) / width - 1.0f;
+    float ndc_y = 1.0f - (2.0f * mouse_y) / height;
+    
+    // Calculate camera position
+    float cam_x = cam_distance * sin(cam_theta) * cos(cam_phi);
+    float cam_y = cam_distance * sin(cam_phi);
+    float cam_z = cam_distance * cos(cam_theta) * cos(cam_phi);
+    
+    ray_origin = vec3(cam_x, cam_y, cam_z);
+    
+    // Calculate ray direction (simplified)
+    vec3 at(0, 0, 0);
+    vec3 forward = normalize(at - ray_origin);
+    vec3 right = normalize(cross(vec3(0, 1, 0), forward));
+    vec3 up = cross(forward, right);
+    
+    // Field of view factor (adjust based on your perspective settings)
+    float fov_factor = tan(DegreesToRadians * 45.0f / 2.0f);
+    
+    // Calculate world space direction
+    ray_dir = normalize(forward + right * ndc_x * fov_factor + up * ndc_y * fov_factor);
+}
+
+// Determine which face was clicked
+std::pair<int, int> pick_face(double mouse_x, double mouse_y) {
+    // If click is outside cube bounds, return invalid face
+    if (!is_point_on_cube(mouse_x, mouse_y)) {
+        return std::make_pair(-1, 0);
+    }
+    
+    // Get ray from mouse position
+    vec3 ray_origin, ray_dir;
+    mouse_to_ray(mouse_x, mouse_y, ray_origin, ray_dir);
+    
+    // Find intersection with cube
+    vec3 intersection_point;
+    int face_hit;
+    
+    if (ray_cube_intersection(ray_origin, ray_dir, intersection_point, face_hit)) {
+        // Determine layer based on intersection point
+        float spacing = CUBE_SIZE + CUBE_GAP;
+        float cube_size = 3.0f * CUBE_SIZE + 2.0f * CUBE_GAP;
+        float min_bound = -cube_size/2.0f;
+        float max_bound = cube_size/2.0f;
+        
+        // Convert intersection point to cubie coordinates
+        int layer;
+        
+        switch (face_hit) {
+            case RIGHT:
+                layer = 1;  // Outer layer
+                break;
+            case LEFT:
+                layer = -1;  // Outer layer
+                break;
+            case TOP:
+                layer = 1;  // Outer layer
+                break;
+            case BOTTOM:
+                layer = -1;  // Outer layer
+                break;
+            case FRONT:
+                layer = 1;  // Outer layer
+                break;
+            case BACK:
+                layer = -1;  // Outer layer
+                break;
+            default:
+                layer = 0;
+        }
+        
+        return std::make_pair(face_hit, layer);
+    }
+    
+    return std::make_pair(-1, 0);
+}
+
+// Display function
+void display() {
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    
+    // Calculate camera position
+    float cam_x = cam_distance * sin(cam_theta) * cos(cam_phi);
+    float cam_y = cam_distance * sin(cam_phi);
+    float cam_z = cam_distance * cos(cam_theta) * cos(cam_phi);
+    
+    // Set up view matrix
+    point4 eye(cam_x, cam_y, cam_z, 1.0);
+    point4 at(0.0, 0.0, 0.0, 1.0);
+    vec4 up(0.0, 1.0, 0.0, 0.0);
+    
+    mat4 view = LookAt(eye, at, up);
+    
+    // Calculate vertices per cubie
+    std::vector<int> vertices_per_cubie;
+    std::vector<int> start_indices;
+    
+    int start_idx = 0;
+    for (const Cubie& cubie : rubiksCube.getCubies()) {
+        int count = 0;
+        for (int face = 0; face < 6; face++) {
+            if (cubie.visible[face]) {
+                count += 6; // 2 triangles * 3 vertices
+            }
+        }
+        
+        vertices_per_cubie.push_back(count);
+        start_indices.push_back(start_idx);
+        start_idx += count;
+    }
+    
+    // Draw each cubie
+    const std::vector<mat4>& transforms = rubiksCube.getTransforms();
+    for (int i = 0; i < rubiksCube.getCubies().size(); i++) {
+        const Cubie& cubie = rubiksCube.getCubies()[i];
+        
+        // Skip if no visible faces
+        if (vertices_per_cubie[i] == 0) continue;
+        
+        // Start with the cubie's transformation
+        mat4 model = transforms[i];
+        
+        // Apply rotation animation if this cubie is on the rotating face
+        if (rubiksCube.isAnimating()) {
+            int rotating_face = rubiksCube.getRotatingFace();
+            int rotating_layer = rubiksCube.getRotatingLayer();
+            float rotation_angle = rubiksCube.getRotationAngle();
+            vec3 rotation_axis = rubiksCube.getRotationAxis();
+            
+            std::vector<int> face_indices = rubiksCube.getFaceCubies(rotating_face, rotating_layer);
+            
+            // Check if this cubie is on the rotating face
+            if (std::find(face_indices.begin(), face_indices.end(), i) != face_indices.end()) {
+                // Calculate rotation center based on face
+                vec3 center(0.0f);
+                float spacing = CUBE_SIZE + CUBE_GAP;
+                
+                // Set center based on the face and layer
+                if (rotating_face == RIGHT || rotating_face == LEFT) {
+                    center.x = rotating_layer * spacing;
+                } else if (rotating_face == TOP || rotating_face == BOTTOM) {
+                    center.y = rotating_layer * spacing;
+                } else { // FRONT or BACK
+                    center.z = rotating_layer * spacing;
+                }
+                
+                // Apply rotation around the center
+                mat4 T1 = Translate(-center);
+                mat4 R;
+                
+                if (rotation_axis.x != 0.0f)
+                    R = RotateX(rotation_angle * (rotation_axis.x > 0 ? 1 : -1));
+                else if (rotation_axis.y != 0.0f)
+                    R = RotateY(rotation_angle * (rotation_axis.y > 0 ? 1 : -1));
+                else
+                    R = RotateZ(rotation_angle * (rotation_axis.z > 0 ? 1 : -1));
+                
+                mat4 T2 = Translate(center);
+                
+                model = T2 * R * T1 * model;
+            }
+        }
+        
+        // Apply view transform and send to shader
+        mat4 model_view = view * model;
+        glUniformMatrix4fv(ModelView, 1, GL_TRUE, model_view);
+        
+        // Draw this cubie
+        glDrawArrays(GL_TRIANGLES, start_indices[i], vertices_per_cubie[i]);
+    }
+}
+
+// Update animation and handle changes that need to be made to the display
+void update() {
+    // Update cube animation
+    if (rubiksCube.isAnimating()) {
+        // Update animation
+        rubiksCube.updateAnimation();
+        
+        // Regenerate geometry if animation completed
+        if (!rubiksCube.isAnimating()) {
+            regenerate_geometry();
+        }
+    }
+}
+
+// Print help information
+void printHelp() {
+    printf("\n===== Rubik's Cube Controls =====\n");
+    printf("Mouse drag: Rotate the entire cube view\n");
+    printf("Mouse click: Select and rotate a face (only works on the cube)\n");
+    printf("R: Randomize the cube\n");
+    printf("H: Show this help message\n");
+    printf("ESC or Q: Exit the program\n");
+    printf("================================\n\n");
+}
+
+// Key callback
+void key_callback(GLFWwindow* window, int key, int scancode, int action, int mods) {
+    if (action == GLFW_PRESS) {
+        switch (key) {
+            case GLFW_KEY_ESCAPE:
+            case GLFW_KEY_Q:
+                glfwSetWindowShouldClose(window, GLFW_TRUE);
+                break;
+            case GLFW_KEY_H:
+                printHelp();
+                break;
+            case GLFW_KEY_R:
+                rubiksCube.randomize();
+                break;
+        }
+    }
+}
+
+// Mouse button callback
+void mouse_button_callback(GLFWwindow* window, int button, int action, int mods) {
+    if (button == GLFW_MOUSE_BUTTON_LEFT) {
+        if (action == GLFW_PRESS) {
+            double xpos, ypos;
+            glfwGetCursorPos(window, &xpos, &ypos);
+            last_x = xpos;
+            last_y = ypos;
+            
+            // First mouse click is always for rotating the view
+            is_rotating_view = true;
+            mouse_dragging = true;
+        } else if (action == GLFW_RELEASE) {
+            // If we didn't move much, consider it a click for face rotation
+            double xpos, ypos;
+            glfwGetCursorPos(window, &xpos, &ypos);
+            double dx = xpos - last_x;
+            double dy = ypos - last_y;
+            double distance = sqrt(dx*dx + dy*dy);
+            
+            // If we didn't drag much, treat as a click
+            if (distance < 5.0 && is_point_on_cube(xpos, ypos) && !rubiksCube.isAnimating()) {
+                auto pick_result = pick_face(xpos, ypos);
+                int face = pick_result.first;
+                int layer = pick_result.second;
+                
+                if (face >= 0 && face < 6) {
+                    rubiksCube.startRotation(face, layer, true);  // Clockwise rotation
+                    regenerate_geometry();
+                }
+            }
+            
+            mouse_dragging = false;
+            is_rotating_view = false;
+        }
+    }
+}
+
+// Cursor position callback for mouse dragging
+void cursor_position_callback(GLFWwindow* window, double xpos, double ypos) {
+    if (mouse_dragging && is_rotating_view) {
+        double dx = xpos - last_x;
+        double dy = ypos - last_y;
+        
+        cam_theta -= dx * 0.01f;
+        cam_phi += dy * 0.01f;
+        
+        // Clamp phi to avoid gimbal lock
+        cam_phi = std::max(-1.5f, std::min(1.5f, cam_phi));
+        
+        last_x = xpos;
+        last_y = ypos;
+    }
+}
+
+// Window resize callback
+void framebuffer_size_callback(GLFWwindow* window, int width, int height) {
+    glViewport(0, 0, width, height);
+    
+    float aspect = float(width) / height;
+    mat4 projection = Perspective(45.0, aspect, 0.1, 100.0);
+    glUniformMatrix4fv(Projection, 1, GL_TRUE, projection);
+}
+
+int main() {
+    // Seed the random number generator
+    srand((unsigned int)time(NULL));
+    
+    // Initialize GLFW
+    if (!glfwInit()) {
+        fprintf(stderr, "Failed to initialize GLFW\n");
+        exit(EXIT_FAILURE);
+    }
+    
+    // Set up window properties
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 1);
+    glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+    glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
+    
+    // Create window
+    GLFWwindow* window = glfwCreateWindow(800, 800, "Rubik's Cube", NULL, NULL);
+    if (!window) {
+        fprintf(stderr, "Failed to create GLFW window\n");
+        glfwTerminate();
+        exit(EXIT_FAILURE);
+    }
+    
+    // Set context and callbacks
+    glfwMakeContextCurrent(window);
+    glfwSetKeyCallback(window, key_callback);
+    glfwSetMouseButtonCallback(window, mouse_button_callback);
+    glfwSetCursorPosCallback(window, cursor_position_callback);
+    glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
+    
+    // Initialize GLEW
+    #ifndef __APPLE__
+    glewExperimental = GL_TRUE;
+    GLenum err = glewInit();
+    if (err != GLEW_OK) {
+        fprintf(stderr, "GLEW initialization error: %s\n", glewGetErrorString(err));
+        return 1;
+    }
+    #endif
+    
+    // Print OpenGL information
+    printf("OpenGL Version: %s\n", glGetString(GL_VERSION));
+    printf("GLSL Version: %s\n", glGetString(GL_SHADING_LANGUAGE_VERSION));
+    printf("Vendor: %s\n", glGetString(GL_VENDOR));
+    printf("Renderer: %s\n", glGetString(GL_RENDERER));
+    
+    // Initialize OpenGL state
+    init();
+    
+    // Print help information
+    printHelp();
+    
+    // Call project-specific function
+    project_done();
+    
+    // Animation loop
+    double frameRate = 60.0;
+    double currentTime, previousTime = 0.0;
+    
+    while (!glfwWindowShouldClose(window)) {
+        currentTime = glfwGetTime();
+        if (currentTime - previousTime >= 1.0/frameRate) {
+            previousTime = currentTime;
+            update();
+        }
+        
+        display();
+        glfwSwapBuffers(window);
+        glfwPollEvents();
+    }
+    
+    // Clean up
+    glDeleteVertexArrays(1, &vao);
+    glDeleteBuffers(1, &buffer);
+    
+    glfwTerminate();
+    return 0;
+}
