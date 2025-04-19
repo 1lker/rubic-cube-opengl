@@ -55,10 +55,19 @@ GLuint ModelView, Projection;
 GLuint vao;
 GLuint buffer;
 
+// Global variables for mouse control
+bool shift_pressed = false;
+bool drag_started = false;
+int drag_face = -1;
+int drag_layer = 0;
+double drag_start_x = 0.0, drag_start_y = 0.0;
+const double DRAG_THRESHOLD = 30.0;  // Pixels to trigger a drag rotation
+
 // Function prototypes
 void key_callback(GLFWwindow* window, int key, int scancode, int action, int mods);
 void mouse_button_callback(GLFWwindow* window, int button, int action, int mods);
 void cursor_position_callback(GLFWwindow* window, double xpos, double ypos);
+void scroll_callback(GLFWwindow* window, double xoffset, double yoffset);
 void framebuffer_size_callback(GLFWwindow* window, int width, int height);
 void printHelp();
 bool is_point_on_cube(double x, double y);
@@ -193,10 +202,16 @@ bool is_point_on_cube(double x, double y) {
     float ndc_x = (2.0f * x) / width - 1.0f;
     float ndc_y = 1.0f - (2.0f * y) / height;
     
-    // Simple check if point is within a certain radius from center
-    // Adjust the radius as needed
-    const float radius = 0.7f; // This covers most of the cube's projection
-    return (ndc_x * ndc_x + ndc_y * ndc_y) < (radius * radius);
+    printf("NDC coordinates: (%.2f, %.2f)\n", ndc_x, ndc_y);
+    
+    // Increase detection radius to make it easier to click on the cube
+    const float radius = 0.9f; // Increased from 0.7f
+    float dist_squared = ndc_x * ndc_x + ndc_y * ndc_y;
+    
+    printf("Distance squared from center: %.2f (threshold: %.2f)\n", 
+           dist_squared, radius * radius);
+    
+    return dist_squared < (radius * radius);
 }
 
 // Ray-cube intersection for better face picking
@@ -206,6 +221,11 @@ bool ray_cube_intersection(const vec3& ray_origin, const vec3& ray_dir,
     float cube_size = 3.0f * CUBE_SIZE + 2.0f * CUBE_GAP;
     float min_bound = -cube_size/2.0f;
     float max_bound = cube_size/2.0f;
+    
+    printf("Ray origin: (%.2f, %.2f, %.2f), direction: (%.2f, %.2f, %.2f)\n", 
+           ray_origin.x, ray_origin.y, ray_origin.z, 
+           ray_dir.x, ray_dir.y, ray_dir.z);
+    printf("Cube bounds: min=%.2f, max=%.2f\n", min_bound, max_bound);
     
     // Ray-box intersection test
     float t_min = INFINITY;
@@ -219,6 +239,7 @@ bool ray_cube_intersection(const vec3& ray_origin, const vec3& ray_dir,
             vec3 p = ray_origin + t * ray_dir;
             if (p.y >= min_bound && p.y <= max_bound && 
                 p.z >= min_bound && p.z <= max_bound) {
+                printf("Hit RIGHT face at (%.2f, %.2f, %.2f), t=%.2f\n", p.x, p.y, p.z, t);
                 if (t < t_min) {
                     t_min = t;
                     hit_face = RIGHT;
@@ -235,6 +256,7 @@ bool ray_cube_intersection(const vec3& ray_origin, const vec3& ray_dir,
             vec3 p = ray_origin + t * ray_dir;
             if (p.y >= min_bound && p.y <= max_bound && 
                 p.z >= min_bound && p.z <= max_bound) {
+                printf("Hit LEFT face at (%.2f, %.2f, %.2f), t=%.2f\n", p.x, p.y, p.z, t);
                 if (t < t_min) {
                     t_min = t;
                     hit_face = LEFT;
@@ -251,6 +273,7 @@ bool ray_cube_intersection(const vec3& ray_origin, const vec3& ray_dir,
             vec3 p = ray_origin + t * ray_dir;
             if (p.x >= min_bound && p.x <= max_bound && 
                 p.z >= min_bound && p.z <= max_bound) {
+                printf("Hit TOP face at (%.2f, %.2f, %.2f), t=%.2f\n", p.x, p.y, p.z, t);
                 if (t < t_min) {
                     t_min = t;
                     hit_face = TOP;
@@ -267,6 +290,7 @@ bool ray_cube_intersection(const vec3& ray_origin, const vec3& ray_dir,
             vec3 p = ray_origin + t * ray_dir;
             if (p.x >= min_bound && p.x <= max_bound && 
                 p.z >= min_bound && p.z <= max_bound) {
+                printf("Hit BOTTOM face at (%.2f, %.2f, %.2f), t=%.2f\n", p.x, p.y, p.z, t);
                 if (t < t_min) {
                     t_min = t;
                     hit_face = BOTTOM;
@@ -283,6 +307,7 @@ bool ray_cube_intersection(const vec3& ray_origin, const vec3& ray_dir,
             vec3 p = ray_origin + t * ray_dir;
             if (p.x >= min_bound && p.x <= max_bound && 
                 p.y >= min_bound && p.y <= max_bound) {
+                printf("Hit FRONT face at (%.2f, %.2f, %.2f), t=%.2f\n", p.x, p.y, p.z, t);
                 if (t < t_min) {
                     t_min = t;
                     hit_face = FRONT;
@@ -299,6 +324,7 @@ bool ray_cube_intersection(const vec3& ray_origin, const vec3& ray_dir,
             vec3 p = ray_origin + t * ray_dir;
             if (p.x >= min_bound && p.x <= max_bound && 
                 p.y >= min_bound && p.y <= max_bound) {
+                printf("Hit BACK face at (%.2f, %.2f, %.2f), t=%.2f\n", p.x, p.y, p.z, t);
                 if (t < t_min) {
                     t_min = t;
                     hit_face = BACK;
@@ -310,9 +336,12 @@ bool ray_cube_intersection(const vec3& ray_origin, const vec3& ray_dir,
     
     if (hit_face != -1) {
         face_hit = hit_face;
+        printf("Final hit face: %d at point (%.2f, %.2f, %.2f)\n", 
+               hit_face, intersection_point.x, intersection_point.y, intersection_point.z);
         return true;
     }
     
+    printf("No face intersection found\n");
     return false;
 }
 
@@ -512,17 +541,33 @@ void update() {
 // Print help information
 void printHelp() {
     printf("\n===== Rubik's Cube Controls =====\n");
-    printf("Mouse drag: Rotate the entire cube view\n");
-    printf("Mouse click: Select and rotate a face (only works on the cube)\n");
-    printf("R: Randomize the cube\n");
-    printf("H: Show this help message\n");
-    printf("ESC or Q: Exit the program\n");
+    printf("Mouse:\n");
+    printf("  Left Drag: Rotate a slice (≈30px to trigger)\n");
+    printf("  Left Click: Rotate face clockwise\n");
+    printf("  Shift+Left Click: Rotate face counter-clockwise\n");
+    printf("  Right Drag: Orbit camera\n");
+    printf("  Mouse Wheel: Zoom in/out\n");
+    printf("Keyboard:\n");
+    printf("  R/r: Right face CW/CCW\n");
+    printf("  L/l: Left face CW/CCW\n");
+    printf("  U/u: Upper face CW/CCW\n");
+    printf("  D/d: Down face CW/CCW\n");
+    printf("  F/f: Front face CW/CCW\n");
+    printf("  B/b: Back face CW/CCW\n");
+    printf("  M/m: Middle slice (X) CW/CCW\n");
+    printf("  E/e: Middle slice (Y) CW/CCW\n");
+    printf("  S/s: Middle slice (Z) CW/CCW\n");
+    printf("  +/-: Zoom in/out\n");
+    printf("  S: Shuffle (20 random moves)\n");
+    printf("  C: Reset cube\n");
+    printf("  H: Show this help message\n");
+    printf("  ESC or Q: Exit the program\n");
     printf("================================\n\n");
 }
 
 // Key callback
 void key_callback(GLFWwindow* window, int key, int scancode, int action, int mods) {
-    if (action == GLFW_PRESS) {
+    if (action == GLFW_PRESS || action == GLFW_REPEAT) {
         switch (key) {
             case GLFW_KEY_ESCAPE:
             case GLFW_KEY_Q:
@@ -531,8 +576,80 @@ void key_callback(GLFWwindow* window, int key, int scancode, int action, int mod
             case GLFW_KEY_H:
                 printHelp();
                 break;
+            // Face rotations - clockwise
             case GLFW_KEY_R:
-                rubiksCube.randomize();
+                if (!(mods & GLFW_MOD_SHIFT) && !rubiksCube.isAnimating())
+                    rubiksCube.startRotation(RIGHT, 1, true);
+                else if ((mods & GLFW_MOD_SHIFT) && !rubiksCube.isAnimating())
+                    rubiksCube.startRotation(RIGHT, 1, false);  // Shift+R for CCW
+                break;
+            case GLFW_KEY_L:
+                if (!(mods & GLFW_MOD_SHIFT) && !rubiksCube.isAnimating())
+                    rubiksCube.startRotation(LEFT, -1, true);
+                else if ((mods & GLFW_MOD_SHIFT) && !rubiksCube.isAnimating())
+                    rubiksCube.startRotation(LEFT, -1, false);  // Shift+L for CCW
+                break;
+            case GLFW_KEY_U:
+                if (!(mods & GLFW_MOD_SHIFT) && !rubiksCube.isAnimating())
+                    rubiksCube.startRotation(TOP, 1, true);
+                else if ((mods & GLFW_MOD_SHIFT) && !rubiksCube.isAnimating())
+                    rubiksCube.startRotation(TOP, 1, false);  // Shift+U for CCW
+                break;
+            case GLFW_KEY_D:
+                if (!(mods & GLFW_MOD_SHIFT) && !rubiksCube.isAnimating())
+                    rubiksCube.startRotation(BOTTOM, -1, true);
+                else if ((mods & GLFW_MOD_SHIFT) && !rubiksCube.isAnimating())
+                    rubiksCube.startRotation(BOTTOM, -1, false);  // Shift+D for CCW
+                break;
+            case GLFW_KEY_F:
+                if (!(mods & GLFW_MOD_SHIFT) && !rubiksCube.isAnimating())
+                    rubiksCube.startRotation(FRONT, 1, true);
+                else if ((mods & GLFW_MOD_SHIFT) && !rubiksCube.isAnimating())
+                    rubiksCube.startRotation(FRONT, 1, false);  // Shift+F for CCW
+                break;
+            case GLFW_KEY_B:
+                if (!(mods & GLFW_MOD_SHIFT) && !rubiksCube.isAnimating())
+                    rubiksCube.startRotation(BACK, -1, true);
+                else if ((mods & GLFW_MOD_SHIFT) && !rubiksCube.isAnimating())
+                    rubiksCube.startRotation(BACK, -1, false);  // Shift+B for CCW
+                break;
+            // Middle slices
+            case GLFW_KEY_M:
+                if (!(mods & GLFW_MOD_SHIFT) && !rubiksCube.isAnimating())
+                    rubiksCube.startRotation(LEFT, 0, true);
+                else if ((mods & GLFW_MOD_SHIFT) && !rubiksCube.isAnimating())
+                    rubiksCube.startRotation(LEFT, 0, false);  // Shift+M for CCW
+                break;
+            case GLFW_KEY_E:
+                if (!(mods & GLFW_MOD_SHIFT) && !rubiksCube.isAnimating())
+                    rubiksCube.startRotation(TOP, 0, true);
+                else if ((mods & GLFW_MOD_SHIFT) && !rubiksCube.isAnimating())
+                    rubiksCube.startRotation(TOP, 0, false);  // Shift+E for CCW
+                break;
+            case GLFW_KEY_S:
+                if (!(mods & GLFW_MOD_SHIFT)) {
+                    // Capital S for shuffle - 20 random moves
+                    if (!rubiksCube.isAnimating()) {
+                        rubiksCube.randomize(20);
+                        printf("Performing 20 random moves...\n");
+                    }
+                } else if ((mods & GLFW_MOD_SHIFT) && !rubiksCube.isAnimating()) {
+                    // Shift+S for middle Z slice rotation
+                    rubiksCube.startRotation(FRONT, 0, false);
+                }
+                break;
+            // Other controls
+            case GLFW_KEY_C:  // Reset
+                rubiksCube.initialize();
+                regenerate_geometry();
+                break;
+            case GLFW_KEY_MINUS:
+            case GLFW_KEY_KP_SUBTRACT:
+                cam_distance = std::min(cam_distance + 0.4f, 10.0f);
+                break;
+            case GLFW_KEY_KP_ADD:
+            case GLFW_KEY_EQUAL:  // + is on same key as = without shift
+                cam_distance = std::max(cam_distance - 0.4f, 2.0f);
                 break;
         }
     }
@@ -540,36 +657,83 @@ void key_callback(GLFWwindow* window, int key, int scancode, int action, int mod
 
 // Mouse button callback
 void mouse_button_callback(GLFWwindow* window, int button, int action, int mods) {
+    shift_pressed = (mods & GLFW_MOD_SHIFT);
+    
     if (button == GLFW_MOUSE_BUTTON_LEFT) {
         if (action == GLFW_PRESS) {
             double xpos, ypos;
             glfwGetCursorPos(window, &xpos, &ypos);
             last_x = xpos;
             last_y = ypos;
+            drag_start_x = xpos;
+            drag_start_y = ypos;
             
-            // First mouse click is always for rotating the view
+            printf("LEFT PRESS: x=%.1f, y=%.1f, shift=%d\n", xpos, ypos, shift_pressed);
+            
+            // Check if click is on the cube
+            bool on_cube = is_point_on_cube(xpos, ypos);
+            printf("Click is %s the cube\n", on_cube ? "ON" : "NOT ON");
+            
+            if (on_cube) {
+                // Set drag mode for face rotation
+                auto pick_result = pick_face(xpos, ypos);
+                drag_face = pick_result.first;
+                drag_layer = pick_result.second;
+                
+                printf("Selected face: %d, layer: %d\n", drag_face, drag_layer);
+                
+                // Only set drag_started if we have a valid face
+                if (drag_face >= 0 && drag_face < 6) {
+                    drag_started = true;
+                } else {
+                    // Not on a valid face, so rotate view
+                    is_rotating_view = true;
+                    printf("No valid face selected, rotating view\n");
+                }
+            } else {
+                // Not on cube, so rotate view
+                is_rotating_view = true;
+                printf("Click not on cube, rotating view\n");
+            }
+            
+            mouse_dragging = true;
+        } else if (action == GLFW_RELEASE) {
+            double xpos, ypos;
+            glfwGetCursorPos(window, &xpos, &ypos);
+            double dx = xpos - drag_start_x;
+            double dy = ypos - drag_start_y;
+            double distance = sqrt(dx*dx + dy*dy);
+            
+            printf("LEFT RELEASE: x=%.1f, y=%.1f, distance=%.1f\n", xpos, ypos, distance);
+            printf("drag_face=%d, is_animating=%d\n", drag_face, rubiksCube.isAnimating());
+            
+            // If we didn't drag much, treat as a click
+            if (distance < 5.0 && is_point_on_cube(xpos, ypos) && !rubiksCube.isAnimating() && drag_face >= 0) {
+                bool clockwise = !shift_pressed;
+                printf("CLICK ROTATION: face %d, layer %d, %s\n", 
+                       drag_face, drag_layer, clockwise ? "CW" : "CCW");
+                rubiksCube.startRotation(drag_face, drag_layer, clockwise);
+                regenerate_geometry();
+            } else {
+                printf("Not triggering click rotation: distance=%.1f, on_cube=%d, animating=%d, face=%d\n",
+                       distance, is_point_on_cube(xpos, ypos), rubiksCube.isAnimating(), drag_face);
+            }
+            
+            mouse_dragging = false;
+            is_rotating_view = false;
+            drag_started = false;
+            drag_face = -1;
+        }
+    } else if (button == GLFW_MOUSE_BUTTON_RIGHT) {
+        if (action == GLFW_PRESS) {
+            double xpos, ypos;
+            glfwGetCursorPos(window, &xpos, &ypos);
+            last_x = xpos;
+            last_y = ypos;
+            
             is_rotating_view = true;
             mouse_dragging = true;
         } else if (action == GLFW_RELEASE) {
-            // If we didn't move much, consider it a click for face rotation
-            double xpos, ypos;
-            glfwGetCursorPos(window, &xpos, &ypos);
-            double dx = xpos - last_x;
-            double dy = ypos - last_y;
-            double distance = sqrt(dx*dx + dy*dy);
-            
-            // If we didn't drag much, treat as a click
-            if (distance < 5.0 && is_point_on_cube(xpos, ypos) && !rubiksCube.isAnimating()) {
-                auto pick_result = pick_face(xpos, ypos);
-                int face = pick_result.first;
-                int layer = pick_result.second;
-                
-                if (face >= 0 && face < 6) {
-                    rubiksCube.startRotation(face, layer, true);  // Clockwise rotation
-                    regenerate_geometry();
-                }
-            }
-            
             mouse_dragging = false;
             is_rotating_view = false;
         }
@@ -578,19 +742,104 @@ void mouse_button_callback(GLFWwindow* window, int button, int action, int mods)
 
 // Cursor position callback for mouse dragging
 void cursor_position_callback(GLFWwindow* window, double xpos, double ypos) {
-    if (mouse_dragging && is_rotating_view) {
-        double dx = xpos - last_x;
-        double dy = ypos - last_y;
-        
-        cam_theta -= dx * 0.01f;
-        cam_phi += dy * 0.01f;
-        
-        // Clamp phi to avoid gimbal lock
-        cam_phi = std::max(-1.5f, std::min(1.5f, cam_phi));
-        
-        last_x = xpos;
-        last_y = ypos;
+    if (mouse_dragging) {
+        if (is_rotating_view) {
+            // Orbit camera
+            double dx = xpos - last_x;
+            double dy = ypos - last_y;
+            
+            cam_theta -= dx * 0.01f;
+            cam_phi += dy * 0.01f;
+            
+            // Clamp phi to avoid gimbal lock
+            cam_phi = std::max(-1.5f, std::min(1.5f, cam_phi));
+            
+            last_x = xpos;
+            last_y = ypos;
+        } else if (drag_started && drag_face >= 0 && !rubiksCube.isAnimating()) {
+            // Handle slice rotation based on drag direction
+            double dx = xpos - drag_start_x;
+            double dy = ypos - drag_start_y;
+            double distance = sqrt(dx*dx + dy*dy);
+            
+            printf("Dragging: dx=%.1f, dy=%.1f, distance=%.1f, threshold=%.1f\n", 
+                   dx, dy, distance, DRAG_THRESHOLD);
+            
+            if (distance > DRAG_THRESHOLD) {
+                bool clockwise = false;
+                
+                // Determine rotation direction based on drag and face
+                switch (drag_face) {
+                    case RIGHT:
+                        // Vertical drag for right face
+                        clockwise = (dy > 0);
+                        printf("RIGHT face: dy=%.1f, clockwise=%d\n", dy, clockwise);
+                        break;
+                    case LEFT:
+                        // Vertical drag for left face
+                        clockwise = (dy < 0);
+                        printf("LEFT face: dy=%.1f, clockwise=%d\n", dy, clockwise);
+                        break;
+                    case TOP:
+                        // Horizontal drag for top face
+                        clockwise = (dx < 0);
+                        printf("TOP face: dx=%.1f, clockwise=%d\n", dx, clockwise);
+                        break;
+                    case BOTTOM:
+                        // Horizontal drag for bottom face
+                        clockwise = (dx > 0);
+                        printf("BOTTOM face: dx=%.1f, clockwise=%d\n", dx, clockwise);
+                        break;
+                    case FRONT:
+                        // Use direction of strongest drag
+                        if (fabs(dx) > fabs(dy)) {
+                            // Horizontal drag - rotate around Y axis
+                            clockwise = (dx < 0);
+                            printf("FRONT face horizontal: dx=%.1f, clockwise=%d\n", dx, clockwise);
+                        } else {
+                            // Vertical drag - rotate around X axis
+                            clockwise = (dy > 0);
+                            printf("FRONT face vertical: dy=%.1f, clockwise=%d\n", dy, clockwise);
+                        }
+                        break;
+                    case BACK:
+                        // Use direction of strongest drag
+                        if (fabs(dx) > fabs(dy)) {
+                            // Horizontal drag - rotate around Y axis
+                            clockwise = (dx > 0);
+                            printf("BACK face horizontal: dx=%.1f, clockwise=%d\n", dx, clockwise);
+                        } else {
+                            // Vertical drag - rotate around X axis
+                            clockwise = (dy < 0);
+                            printf("BACK face vertical: dy=%.1f, clockwise=%d\n", dy, clockwise);
+                        }
+                        break;
+                }
+                
+                // Apply shift modifier to invert direction if necessary
+                if (shift_pressed) {
+                    clockwise = !clockwise;
+                    printf("Shift pressed, inverting rotation to: %s\n", clockwise ? "CW" : "CCW");
+                }
+                
+                // Start the rotation
+                printf("Starting drag rotation: face=%d, layer=%d, %s\n", 
+                       drag_face, drag_layer, clockwise ? "CW" : "CCW");
+                rubiksCube.startRotation(drag_face, drag_layer, clockwise);
+                regenerate_geometry();
+                
+                // Reset drag state
+                drag_started = false;
+                drag_face = -1;
+            }
+        }
     }
+}
+
+// Scroll callback for zoom
+void scroll_callback(GLFWwindow* window, double xoffset, double yoffset) {
+    // Zoom in/out with the scroll wheel
+    cam_distance = std::max(2.0f, std::min(10.0f, cam_distance - (float)yoffset * 0.4f));
 }
 
 // Window resize callback
@@ -632,6 +881,7 @@ int main() {
     glfwSetMouseButtonCallback(window, mouse_button_callback);
     glfwSetCursorPosCallback(window, cursor_position_callback);
     glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
+    glfwSetScrollCallback(window, scroll_callback);
     
     // Initialize GLEW
     #ifndef __APPLE__

@@ -39,42 +39,88 @@ void RubiksCube::initialize() {
 // --------------- animation --------------------------------------------------
 void RubiksCube::randomize(int moves) {
     rotation_queue.clear();
-    static const int layers[6] = {1,-1,1,-1,1,-1};
-    for (int i=0;i<moves;++i){
-        int f = rand()%6;
-        rotation_queue.emplace_back(f,layers[f]);
+    static const int faces[6] = {RIGHT, LEFT, TOP, BOTTOM, FRONT, BACK};
+    static const int layers[6] = {1, -1, 1, -1, 1, -1};
+    
+    printf("Queueing %d random moves\n", moves);
+    
+    // Generate random moves and add to queue - one move at a time
+    for (int i = 0; i < moves; i++) {
+        int face_idx = rand() % 6;
+        int face = faces[face_idx];
+        int layer = layers[face_idx];
+        bool clockwise = (rand() % 2 == 0);
+        
+        // Store face, layer, and whether it's clockwise
+        rotation_queue.emplace_back(std::make_pair(face, layer));
+        rotation_queue_clockwise.push_back(clockwise);
+        
+        printf("Queued move %d: Face %d, Layer %d, %s\n", 
+               i+1, face, layer, clockwise ? "CW" : "CCW");
     }
-    if(!animation_active && !rotation_queue.empty()){
-        auto n = rotation_queue.front();
+    
+    // Start the first rotation if not already animating
+    if (!animation_active && !rotation_queue.empty()) {
+        auto move = rotation_queue.front();
+        bool clockwise = rotation_queue_clockwise.front();
         rotation_queue.erase(rotation_queue.begin());
-        startRotation(n.first,n.second,true);
+        rotation_queue_clockwise.erase(rotation_queue_clockwise.begin());
+        
+        printf("Starting first move: Face %d, Layer %d, %s\n", 
+               move.first, move.second, clockwise ? "CW" : "CCW");
+        startRotation(move.first, move.second, clockwise);
     }
 }
 
 // --------------- animation --------------------------------------------------
 void RubiksCube::startRotation(int face, int layer, bool clockwise) {
-    if (animation_active || layer == 0) return; // disallow middle slices for simplicity
+    if (animation_active) return; // Don't start new rotation if one is already in progress
 
     rotating_face  = face;
     rotating_layer = layer;
     rotation_angle = 0.0f;
+    rotating_clockwise = !clockwise;
     animation_active = true;
 
     rotation_axis = FACE_DIR[face];
-    if (!clockwise) rotation_axis = -rotation_axis;
+    if (clockwise) rotation_axis = -rotation_axis;
 
-    logRotation(face, layer, clockwise);
+    logRotation(face, layer, !clockwise);
 }
 
 void RubiksCube::updateAnimation() {
-    if (!animation_active) return;
+    if (!animation_active) {
+        // If we have more moves in the queue, start the next one
+        if (!rotation_queue.empty()) {
+            auto move = rotation_queue.front();
+            bool clockwise = rotation_queue_clockwise.front();
+            rotation_queue.erase(rotation_queue.begin());
+            rotation_queue_clockwise.erase(rotation_queue_clockwise.begin());
+            
+            printf("Starting next queued move: Face %d, Layer %d, %s\n", 
+                   move.first, move.second, clockwise ? "CW" : "CCW");
+            startRotation(move.first, move.second, clockwise);
+        }
+        return;
+    }
 
     rotation_angle += ROTATION_SPEED;
     if (rotation_angle >= 90.0f) {
-        bool clockwise = (rotation_axis == FACE_DIR[rotating_face]);
-        updateCubiesAfterRotation(rotating_face, rotating_layer, clockwise);
-        rotation_angle   = 0.0f;
+        updateCubiesAfterRotation(rotating_face, rotating_layer, !rotating_clockwise);
+        rotation_angle = 0.0f;
         animation_active = false;
+        
+        // If we have more moves in the queue, start the next one
+        if (!rotation_queue.empty()) {
+            auto move = rotation_queue.front();
+            bool clockwise = rotation_queue_clockwise.front();
+            rotation_queue.erase(rotation_queue.begin());
+            rotation_queue_clockwise.erase(rotation_queue_clockwise.begin());
+            
+            printf("Starting next move in sequence: Face %d, Layer %d, %s\n", 
+                   move.first, move.second, clockwise ? "CW" : "CCW");
+            startRotation(move.first, move.second, clockwise);
+        }
     }
 }
 
@@ -83,7 +129,12 @@ void RubiksCube::updateCubiesAfterRotation(int face, int layer, bool clockwise) 
     // Determine principal axis index and cw direction according to our helper
     int axis = (face == RIGHT || face == LEFT) ? 0 : (face == TOP || face == BOTTOM ? 1 : 2);
     // For LEFT, BOTTOM, BACK faces the perceived clockwise is opposite
-    if (face == LEFT || face == BOTTOM || face == BACK) clockwise = !clockwise;
+    bool perceived_clockwise = clockwise;
+    if (face == LEFT || face == BOTTOM || face == BACK) 
+        perceived_clockwise = !perceived_clockwise;
+
+    printf("Updating cubies after rotation: face %d, layer %d, clockwise %d, perceived_clockwise %d\n", 
+           face, layer, clockwise, perceived_clockwise);
 
     // Gather indices of cubies in the affected slice
     std::vector<int> slice = getFaceCubies(face, layer);
@@ -98,7 +149,7 @@ void RubiksCube::updateCubiesAfterRotation(int face, int layer, bool clockwise) 
         else centre.z = layer;
 
         vec3 rel = vec3(c.x, c.y, c.z) - centre;
-        vec3 relR = rotateVec90(rel, axis, clockwise);
+        vec3 relR = rotateVec90(rel, axis, perceived_clockwise);
         vec3 posN = relR + centre;
         c.x = int(round(posN.x));
         c.y = int(round(posN.y));
@@ -113,14 +164,26 @@ void RubiksCube::updateCubiesAfterRotation(int face, int layer, bool clockwise) 
 
         for (int f = 0; f < 6; ++f) {
             vec3 dirOld = FACE_DIR[f];
-            vec3 dirNew = rotateVec90(dirOld, axis, clockwise);
+            vec3 dirNew = rotateVec90(dirOld, axis, perceived_clockwise);
             int toFace = -1;
             for (int k = 0; k < 6; ++k) {
-                if (dot(dirNew, FACE_DIR[k]) > 0.9f) { toFace = k; break; }
+                if (dot(dirNew, FACE_DIR[k]) > 0.9f) { 
+                    toFace = k; 
+                    break; 
+                }
             }
-            newColors[toFace] = src.colors[f];
+            if (toFace != -1) {
+                newColors[toFace] = src.colors[f];
+                printf("Color map: face %d -> face %d\n", f, toFace);
+            } else {
+                printf("ERROR: Could not find destination face for direction (%.2f, %.2f, %.2f)\n",
+                       dirNew.x, dirNew.y, dirNew.z);
+            }
         }
-        for (int k = 0; k < 6; ++k) dst.colors[k] = newColors[k];
+        
+        // Copy the new colors
+        for (int k = 0; k < 6; ++k) 
+            dst.colors[k] = newColors[k];
 
         dst.updateVisibility();
         cubie_transforms[idx] = calculateCubieTransform(dst.x, dst.y, dst.z);

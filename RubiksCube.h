@@ -32,6 +32,8 @@ public:
     int getRotatingLayer() const { return rotating_layer; }
     float getRotationAngle() const { return rotation_angle; }
     const vec3& getRotationAxis() const { return rotation_axis; }
+    bool isRotatingClockwise() const { return rotating_clockwise; }
+    
     
     // Get cubies on a specific face and layer
     std::vector<int> getFaceCubies(int face, int layer) const;
@@ -47,8 +49,10 @@ private:
     int rotating_layer;
     float rotation_angle;
     vec3 rotation_axis;
+    bool rotating_clockwise;
     bool animation_active;
     std::vector<std::pair<int, int>> rotation_queue; // <face, layer>
+    std::vector<bool> rotation_queue_clockwise; // Whether each queued rotation is clockwise
     
     // Helper methods
     void regenerateTransforms();
