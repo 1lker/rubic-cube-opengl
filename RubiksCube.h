@@ -5,8 +5,8 @@
 #include <vector>
 
 // Constants
-const float CUBE_SIZE = 0.25f;
-const float CUBE_GAP = 0.03f;
+const float CUBE_SIZE = 0.28f;
+const float CUBE_GAP = 0.01f;
 const float ROTATION_SPEED = 3.0f;
 
 class RubiksCube {
