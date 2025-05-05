@@ -7,10 +7,6 @@
 #include <ctime>
 #include <cmath>
 
-// Comment required by the project specification
-// Ortho is the new Porto!
-// Pineapple is important
-
 // Vertices of a unit cube centered at origin
 point4 vertices[8] = {
     point4(-0.5, -0.5,  0.5, 1.0),  // 0: left-bottom-front
@@ -72,11 +68,6 @@ void framebuffer_size_callback(GLFWwindow* window, int width, int height);
 void printHelp();
 bool is_point_on_cube(double x, double y);
 std::pair<int, int> pick_face(double mouse_x, double mouse_y, bool force_selection = false);
-
-// Function required by the project specification
-void project_done() {
-    printf("314254 Done!\n");
-}
 
 // Create vertices and colors for a single cubie
 void generate_cubie_geometry(const Cubie& cubie, std::vector<point4>& out_points, std::vector<color4>& out_colors) {
@@ -967,9 +958,6 @@ int main() {
     
     // Print help information
     printHelp();
-    
-    // Call project-specific function
-    project_done();
     
     // Animation loop
     double frameRate = 60.0;
